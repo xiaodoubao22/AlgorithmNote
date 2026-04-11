@@ -3,8 +3,8 @@ import numpy as np
 
 EPS = 1e-6
 
-# knots = np.array([0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0])
-knots = np.array([0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 5.0, 5.0])
+knots = np.array([0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0])
+#knots = np.array([0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 5.0, 5.0])
 controlPoints = np.array([[0.0, 1.0], [1.0, -1.0], [2.0, 1.0], [3.0, -1.0], [4.0, 1.0],
                           [5.0, -1.0], [6.0, 1.0], [7.0, -1.0], [8.0, 1.0], [9.0, -1.0]])
 
@@ -76,16 +76,16 @@ if __name__ == '__main__':
 
     fig = plt.figure(figsize=(6,8))
     ax1=fig.add_subplot(4, 1, 1)
-    # ax2=fig.add_subplot(4, 1, 2)
-    # ax3=fig.add_subplot(4, 1, 3)
-    # ax4=fig.add_subplot(4, 1, 4)
-    # for k in range(len(knots) - 1):
-    #     ax1.plot(uArr, b1Arr[k,:], color='blue')
-    # for k in range(len(knots) - 2):
-    #     ax2.plot(uArr, b2Arr[k,:], color='red')
-    # for k in range(len(knots) - 3):
-    #     ax3.plot(uArr, b3Arr[k,:], color='orange')
-    # ax4.plot(pointsX, pointsY, color='black')
-    # ax4.scatter(controlPoints[:, 0], controlPoints[:, 1], color='black')
+    ax2=fig.add_subplot(4, 1, 2)
+    ax3=fig.add_subplot(4, 1, 3)
+    ax4=fig.add_subplot(4, 1, 4)
+    for k in range(len(knots) - 1):
+        ax1.plot(uArr, b1Arr[k,:], color='blue')
+    for k in range(len(knots) - 2):
+        ax2.plot(uArr, b2Arr[k,:], color='red')
+    for k in range(len(knots) - 3):
+        ax3.plot(uArr, b3Arr[k,:], color='orange')
+    ax4.plot(pointsX, pointsY, color='black')
+    ax4.scatter(controlPoints[:, 0], controlPoints[:, 1], color='black')
     plt.show() 
 

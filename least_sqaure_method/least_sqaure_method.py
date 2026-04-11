@@ -7,6 +7,7 @@ def LSMPoly(inputX, inputY, dMax):
     A = np.array([(inputX ** i) for i in range(dMax + 1)]).T
     b = np.array([inputY]).T
 
+    # 求解 A * x = b
     # 法线方程: (A' * A) * x_ = A' * b
     # 求解: x_ = inv(A' * A) * (A' * b)
     AA = A.T @ A
