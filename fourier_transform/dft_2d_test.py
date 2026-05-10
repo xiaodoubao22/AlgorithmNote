@@ -6,7 +6,7 @@ REAL = 0
 IMAG = 1
 
 FilterRad = 0.2
-FilePath = "./data/Cameraman.bmp"
+FilePath = "./data/view.bmp"
 
 def ReadImage(filePath:str) -> np.ndarray:
     print(type(filePath))
