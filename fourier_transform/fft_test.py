@@ -22,10 +22,10 @@ def FuncSquare(w:float, phi:float, t:np. array) -> np.array:
 def DFTBaseFunctions(w:float, t:np.array) -> np.ndarray:
     # 基函数根据欧拉公式展开 exp(-i * (2 * pi * k * n) / N) = cos(2 * pi * k * n / N) - i * sin(2 * pi * k * n / N)
     # base也称为DFT矩阵
+    tk = t.reshape(N, 1) @ t.reshape(1, N)
     base = np.zeros((2, K, N))
-    for k in range(0, K):
-        base[REAL][k] = np.cos(w * k * t)
-        base[IMAG][k] = -np.sin(w * k * t)
+    base[REAL] = np.cos(w * tk)
+    base[IMAG] = -np.sin(w * tk)
     return base
 
 def DFT(y:np.array, base:np.ndarray) -> np.array:
@@ -46,10 +46,11 @@ def IDFT(w:float, preK:int, ft:np.array) -> np.array:
     # = (a * cos(wkn) - b * sin(wkn)) (虚部共轭对称抵消)
     # 矩阵形式 y = IDFTMatrix @ F.T
     k = np.linspace(0, N - 1, N)
+    kn = k.reshape(N, 1) @ k.reshape(1, N)
+
     ibase = np.zeros((2, N, K))
-    for n in range(0, N):
-        ibase[REAL][n] = np.cos(w * k * n)
-        ibase[IMAG][n] = np.sin(w * k * n)
+    ibase[REAL] = np.cos(w * kn)
+    ibase[IMAG] = np.sin(w * kn)
     ift = ibase[REAL] @ ft[REAL].T - ibase[IMAG] @ ft[IMAG].T
     return ift
 
@@ -64,7 +65,7 @@ def FFTRecur(st:int, n:int, step:int) -> np.array:
 
     # Pe, Po = P[0::2], P[1::2]
     ye, yo = FFTRecur(st, n_2, step * 2), FFTRecur(st + step, n_2, step * 2)
- 
+
     # wj = exp(-i * (2  *pi * j / N)) = cos(2 * pi * j / N) - i * sin(2 * pi * j / N)
     global cosTerm, sinTerm
 

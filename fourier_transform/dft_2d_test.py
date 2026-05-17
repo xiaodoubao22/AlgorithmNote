@@ -19,12 +19,13 @@ def AbsComplex(F:np.ndarray) -> np.ndarray:
 
 def BaseImage(t:np.array) -> np.ndarray:
     N = len(t)
-    K = N
     w = 2.0 * np.pi / N
-    base = np.zeros((2, K, N))
-    for k in range(0, K):
-        base[REAL][k] = np.cos(w * t * k)
-        base[IMAG][k] = -np.sin(w * t * k)
+
+    tk = t.reshape(N, 1) @ t.reshape(1, N)
+
+    base = np.zeros((2, N, N))
+    base[REAL] = np.cos(w * tk)
+    base[IMAG] = -np.sin(w * tk)
     return base
 
 def DFT2D(baseY, baseX, oriImg):
@@ -33,17 +34,13 @@ def DFT2D(baseY, baseX, oriImg):
     U = X
     V = Y
 
-    Fxv = np.zeros((2, V, X))
-    for v in range(0, V):
-        Fxv[REAL][v] = baseY[REAL][v] @ oriImg
-        Fxv[IMAG][v] = baseY[IMAG][v] @ oriImg
+    Fxv = np.zeros((2, V, X))    # 矩阵宽高：baseY(Y, Y) @ oriImg(Y, X) = Fxv(Y, X)
+    Fxv[REAL] = baseY[REAL] @ oriImg
+    Fxv[IMAG] = baseY[IMAG] @ oriImg
 
-    Fuv = np.zeros((2, V, U))
-    for u in range(0, U):
-        Fuv[REAL, :, u] = (Fxv[REAL] @ baseX[REAL][u].reshape(U, 1)).ravel() - \
-            (Fxv[IMAG] @ baseX[IMAG][u].reshape(U, 1)).ravel()
-        Fuv[IMAG, :, u] = (Fxv[REAL] @ baseX[IMAG][u].reshape(U, 1)).ravel() + \
-            (Fxv[IMAG] @ baseX[REAL][u].reshape(U, 1)).ravel()
+    Fuv = np.zeros((2, V, U))    # 矩阵宽高：Fxv(Y, X) @ baseX(X, X) = Fuv(Y, X)
+    Fuv[REAL] = Fxv[REAL] @ baseX[REAL] - Fxv[IMAG] @ baseX[IMAG]
+    Fuv[IMAG] = Fxv[REAL] @ baseX[IMAG] + Fxv[IMAG] @ baseX[REAL]
     return Fxv, Fuv
 
 def IDFT2D(baseY, baseX, Fuv):
@@ -57,18 +54,12 @@ def IDFT2D(baseY, baseX, Fuv):
     # = (a + b * i)(cos(wvy) + sin(wvy) * i)
     # = (a * cos(wvy) - b * sin(wvy) + (a * sin(wvy) + b * cos(wvy)) * i)
     Fuy = np.zeros((2, Y, U))
-    for y in range(0, Y):
-        Fuy[REAL][y] = baseY[REAL][y] @ Fuv[REAL] + baseY[IMAG][y] @ Fuv[IMAG]
-        Fuy[IMAG][y] = -baseY[IMAG][y] @ Fuv[REAL] + baseY[REAL][y] @ Fuv[IMAG]
-    
+    Fuy[REAL] = baseY[REAL] @ Fuv[REAL] + baseY[IMAG] @ Fuv[IMAG]
+    Fuy[IMAG] = -baseY[IMAG] @ Fuv[REAL] + baseY[REAL] @ Fuv[IMAG]
     Fuy *= 1.0 / V
 
     Fxy = np.zeros((Y, X))
-    for x in range(0, X):
-        # 虚部抵消，只计算实部
-        Fxy[:, x] = (Fuy[REAL] @ baseX[REAL][x].reshape(X, 1)).ravel() + \
-            (Fuy[IMAG] @ baseX[IMAG][x].reshape(X, 1)).ravel()
-    
+    Fxy = Fuy[REAL] @ baseX[REAL] + Fuy[IMAG] @ baseX[IMAG] # 虚部抵消，只计算实部
     Fxy *= 1.0 / U
     return Fxy, Fuy
 
@@ -126,7 +117,6 @@ if __name__ == '__main__':
     Fxy, Fuy = IDFT2D(baseY, baseX, Fuv)
 
     F = np.fft.fft2(originImage)
-    print(F.shape)
 
     # 显示图像
     fig = plt.figure(figsize=(14, 6))
