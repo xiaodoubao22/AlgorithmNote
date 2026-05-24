@@ -2,15 +2,31 @@ import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
 from collections import namedtuple
+from matplotlib.colors import hsv_to_rgb
 
 vec2 = namedtuple('vec2', ['x', 'y'])
 
 FilePathA = "../data/game_sequence/0010.png"
 FilePathB = "../data/game_sequence/0011.png"
+FILE_PREFIX = "../data/game_sequence/"
 BLOCK_SIZE = 32
 CORE_SIZE = 8
 SIDE_SIZE = (BLOCK_SIZE - CORE_SIZE) // 2
 DOWN_SAMPLE_COUNT = 2
+
+metaData = []
+window = np.hanning(BLOCK_SIZE)[:, np.newaxis] * np.hanning(BLOCK_SIZE)
+preColorImage = np.zeros([0])
+curColorImage = np.zeros([0])
+preDownSampleImage = np.zeros([0])
+curDownSampleImage = np.zeros([0])
+preBlocksImage = np.zeros([0])
+curBlocksImage = np.zeros([0])
+preFFTImage = np.zeros([0])
+curFFTImage = np.zeros([0])
+CPSImage = np.zeros([0])
+cpsIFFT = np.zeros([0])
+OFImage = np.zeros([0])
 
 def ReadImage(filePath:str) -> np.ndarray:
     print(type(filePath))
@@ -23,7 +39,7 @@ def DownSample(oriImage:np.ndarray) -> np.ndarray:
     h, w = oriImage.shape
     h_even, w_even = h - (h % 2), w - (w % 2)
     clipped = oriImage[:h_even, :w_even]
-    
+
     # 重塑维度为 (h/2, 2, w/2, 2)，然后在第 1 和第 3 个轴上取均值
     downsampled = clipped.reshape(h_even // 2, 2, w_even // 2, 2).mean(axis=(1, 3))
     
@@ -35,16 +51,14 @@ def BlockGenerate(oriImage:np.ndarray) -> tuple[np.ndarray, int, int]:
 
     paddingImage = np.vstack((oriImage[:SIDE_SIZE, :], oriImage, oriImage[-SIDE_SIZE:, :]))
     paddingImage = np.hstack((paddingImage[:, :SIDE_SIZE], paddingImage, paddingImage[:, -SIDE_SIZE:]))
-
-    print(paddingImage.shape)
     
     blockCountH = ((h - 1) // CORE_SIZE + 1)
     blockCountW = ((w - 1) // CORE_SIZE + 1)
-    print(blockCountH, blockCountW)
+    print("分块数量", blockCountH, blockCountW)
 
     blockStepH = h // blockCountH
     blockStepW = w // blockCountW
-    print(blockStepH, blockStepW)
+    print("块间距", blockStepH, blockStepW)
 
     blocksH = blockCountH * BLOCK_SIZE
     blocksW = blockCountW * BLOCK_SIZE
@@ -60,69 +74,82 @@ def BlockGenerate(oriImage:np.ndarray) -> tuple[np.ndarray, int, int]:
         stH += blockStepH
     return blocks, blockCountH, blockCountW
 
+def FlowToHsv(flow:np.ndarray) -> np.ndarray:
+    dx = flow[..., 0]
+    dy = flow[..., 1]
 
-if __name__ == '__main__':
-    np.set_printoptions(precision=3)
+    # 计算角度和幅度
+    angle = np.arctan2(dy, dx)
+    magnitude = np.sqrt(dx**2 + dy**2)
 
+    # 归一化
+    magnitude = (magnitude - magnitude.min()) / (magnitude.max() - magnitude.min() + 1e-8)
+
+    # 构建 HSV
+    hsv = np.zeros((flow.shape[0], flow.shape[1], 3))
+    hsv[...,0] = (angle + np.pi) / (2 * np.pi)  # 色相
+    hsv[...,1] = magnitude                      # 饱和度
+    hsv[...,2] = 1.0                            # 亮度
+
+    # 转 RGB
+    return hsv_to_rgb(hsv)
+
+def Loop(n:int, firstLoop:bool):
+    print("======循环开始======")
+    global metaData
+    global window
+    global preColorImage
+    global curColorImage
+    global preDownSampleImage
+    global curDownSampleImage
+    global preBlocksImage
+    global curBlocksImage
+    global preFFTImage
+    global curFFTImage
+    global CPSImage
+    global cpsIFFT
+    global OFImage
+
+    if not firstLoop:
+        preColorImage, curColorImage = curColorImage, preColorImage
+        preDownSampleImage, curDownSampleImage = curDownSampleImage, preDownSampleImage
+        preBlocksImage, curBlocksImage = curBlocksImage, preBlocksImage
+        preFFTImage, curFFTImage = curFFTImage, preFFTImage
+        preColorImage, curColorImage = curColorImage, preColorImage
+
+    # 取数据 
+    curColorImage = metaData[n]
     
-    window = np.hanning(BLOCK_SIZE)[:, np.newaxis] * np.hanning(BLOCK_SIZE)
+    # 转灰度图
+    lumaImage = np.dot(curColorImage[..., :3], [0.299, 0.587, 0.114]).astype(curColorImage.dtype)
 
-
-    # 读图、初始化数据
-    metaDataA = ReadImage(FilePathA)
-    metaDataA = np.dot(metaDataA[..., :3], [0.299, 0.587, 0.114]).astype(metaDataA.dtype)
+    # 下采样
+    curDownSampleImage = lumaImage
     for _ in range(DOWN_SAMPLE_COUNT):
-        metaDataA = DownSample(metaDataA)
-    
-    h, w = metaDataA.shape
-    print(f"下采样 {metaDataA.shape}")
+        curDownSampleImage = DownSample(curDownSampleImage)
+    print(f"下采样尺寸 {curDownSampleImage.shape}")
 
     # 分块
-    blocksImage, bch, bcw = BlockGenerate(metaDataA)
+    curBlocksImage, bch, bcw = BlockGenerate(curDownSampleImage)
 
-    # window
+    # 加窗
     for bh in range(bch):
         for bw in range(bcw):
-            blocksImage[bh * BLOCK_SIZE:bh * BLOCK_SIZE + BLOCK_SIZE, bw * BLOCK_SIZE:bw * BLOCK_SIZE + BLOCK_SIZE] *= window
-
+            curBlocksImage[bh * BLOCK_SIZE:bh * BLOCK_SIZE + BLOCK_SIZE, bw * BLOCK_SIZE:bw * BLOCK_SIZE + BLOCK_SIZE] *= window
 
     # FFT
-    FFTImage = np.zeros([bch * BLOCK_SIZE, bcw * BLOCK_SIZE], dtype=np.complex128)
+    curFFTImage = np.zeros([bch * BLOCK_SIZE, bcw * BLOCK_SIZE], dtype=np.complex128)
     for bh in range(bch):
         for bw in range(bcw):
-            FFTImage[bh * BLOCK_SIZE:bh * BLOCK_SIZE + BLOCK_SIZE, bw * BLOCK_SIZE:bw * BLOCK_SIZE + BLOCK_SIZE] =\
-            np.fft.fft2(blocksImage[bh * BLOCK_SIZE:bh * BLOCK_SIZE + BLOCK_SIZE, bw * BLOCK_SIZE:bw * BLOCK_SIZE + BLOCK_SIZE])
+            curFFTImage[bh * BLOCK_SIZE:bh * BLOCK_SIZE + BLOCK_SIZE, bw * BLOCK_SIZE:bw * BLOCK_SIZE + BLOCK_SIZE] =\
+            np.fft.fft2(curBlocksImage[bh * BLOCK_SIZE:bh * BLOCK_SIZE + BLOCK_SIZE, bw * BLOCK_SIZE:bw * BLOCK_SIZE + BLOCK_SIZE])
 
-
-
-
-
-    # 读图、初始化数据
-    metaDataB = ReadImage(FilePathB)
-    metaDataB = np.dot(metaDataB[..., :3], [0.299, 0.587, 0.114]).astype(metaDataB.dtype)
-    for _ in range(DOWN_SAMPLE_COUNT):
-        metaDataB = DownSample(metaDataB)
-    
-    h, w = metaDataB.shape
-    print(f"下采样 {metaDataB.shape}")
-
-    # 分块
-    blocksImageB, bch, bcw = BlockGenerate(metaDataB)
-
-    # window
-    for bh in range(bch):
-        for bw in range(bcw):
-            blocksImageB[bh * BLOCK_SIZE:bh * BLOCK_SIZE + BLOCK_SIZE, bw * BLOCK_SIZE:bw * BLOCK_SIZE + BLOCK_SIZE] *= window
-
-    # FFT
-    FFTImageB = np.zeros([bch * BLOCK_SIZE, bcw * BLOCK_SIZE], dtype=np.complex128)
-    for bh in range(bch):
-        for bw in range(bcw):
-            FFTImageB[bh * BLOCK_SIZE:bh * BLOCK_SIZE + BLOCK_SIZE, bw * BLOCK_SIZE:bw * BLOCK_SIZE + BLOCK_SIZE] =\
-            np.fft.fft2(blocksImageB[bh * BLOCK_SIZE:bh * BLOCK_SIZE + BLOCK_SIZE, bw * BLOCK_SIZE:bw * BLOCK_SIZE + BLOCK_SIZE])
+    if firstLoop:
+        print("======首帧循环结束======")
+        return
 
     # CPS
-    CPSImage = FFTImage * np.conj(FFTImageB)
+    CPSImage = curFFTImage * np.conj(preFFTImage)
     CPSImage /= np.abs(CPSImage) + 1e-6
 
     # IFFT
@@ -143,37 +170,28 @@ if __name__ == '__main__':
                 y -= BLOCK_SIZE
             if x >= BLOCK_SIZE / 2:
                 x -= BLOCK_SIZE
-            print(maxVal, x, y)
             OFImage[bh, bw] = np.array([x, y]) / 32.0
+    print("======循环结束======")
 
+if __name__ == '__main__':
+    np.set_printoptions(precision=3)
 
-    dx = OFImage[:,:,0]
-    dy = OFImage[:,:,1]
+    start = 10
+    end = 19
+    metaData = [ReadImage(FILE_PREFIX + "{:04d}.png".format(n)) for n in range(start, end + 1)]
+    print(f"连续图像数量 {len(metaData)}")
+    print(metaData[0].shape)
 
-    # 计算角度和幅度
-    angle = np.arctan2(dy, dx)
-    magnitude = np.sqrt(dx**2 + dy**2)
+    curIndex = 0
 
-    # 归一化
-    magnitude = (magnitude - magnitude.min()) / (magnitude.max() - magnitude.min() + 1e-8)
+    Loop(curIndex, True)
+    curIndex += 1
 
-    # 构建 HSV
-    hsv = np.zeros((bch,bcw,3))
-    hsv[...,0] = (angle + np.pi) / (2 * np.pi)  # 色相
-    hsv[...,1] = magnitude                     # 饱和度
-    hsv[...,2] = 1.0                            # 亮度
-
-    # 转 RGB
-    from matplotlib.colors import hsv_to_rgb
-    flow_rgb = hsv_to_rgb(hsv)
-
-    plt.imshow(flow_rgb)
-    plt.title('Optical Flow (Matplotlib)')
-    plt.axis('off')
-    plt.show()
+    Loop(curIndex, False)
+    curIndex += 1
 
     # 显示图像
-    fig = plt.figure(figsize=(16, 8))
+    fig, ax = plt.subplots(2, 3, figsize=(18, 9))  # 1行2列
     fig.subplots_adjust(
         left=0.03,    # 左边缘留白（默认~0.125）
         right=0.97,   # 右边缘留白（默认~0.9）
@@ -182,132 +200,77 @@ if __name__ == '__main__':
         wspace=0.2,  # 子图水平间距（默认~0.2）
         hspace=0.2   # 子图垂直间距（默认~0.2）
     )
+    im = [() for _ in range(2)]
 
-    # 原图像
-    ax=fig.add_subplot(2, 4, 1)
-    ax.set_title(f"blockA {blocksImage.shape}", loc="center", fontsize=10)
-    ax.imshow(blocksImage, cmap='gray')
+    # color：
+    pRow, pCol = 0, 0
+    im[pRow] += (ax[pRow][pCol].imshow(curColorImage),)
+    ax[pRow][pCol].set_title(f"blocksImage {curIndex}")
+    ax[pRow][pCol].axis('off')
 
-    ax=fig.add_subplot(2, 4, 5)
-    ax.set_title(f"blockB", loc="center", fontsize=10)
-    ax.imshow(blocksImageB, cmap='gray')
+    # downSample
+    pRow, pCol = 0, 1
+    im[pRow] += (ax[pRow][pCol].imshow(curDownSampleImage, cmap='gray'),)
+    ax[pRow][pCol].set_title(f"down sample {curDownSampleImage.shape}")
+    ax[pRow][pCol].axis('off')
+
+    # block：
+    pRow, pCol = 0, 2
+    im[pRow] += (ax[pRow][pCol].imshow(curBlocksImage, cmap='gray'),)
+    ax[pRow][pCol].set_title(f"block {curBlocksImage.shape}")
+    ax[pRow][pCol].axis('off')
 
     # FFT
-    ax=fig.add_subplot(2, 4, 2)
-    ax.set_title(f"FFT A", loc="center", fontsize=10)
-    fAbs = np.abs(FFTImage)
+    pRow, pCol = 1, 0
+    fAbs = np.abs(curFFTImage)
     fMin, fMax = np.percentile(fAbs, [5, 95])
-    ax.imshow(fAbs, cmap='gray', vmin=fMin, vmax=fMax)
-
-    ax=fig.add_subplot(2, 4, 6)
-    ax.set_title(f"FFT B", loc="center", fontsize=10)
-    fAbs = np.abs(FFTImageB)
-    fMin, fMax = np.percentile(fAbs, [5, 95])
-    ax.imshow(fAbs, cmap='gray', vmin=fMin, vmax=fMax)
-
-    # CPS
-    ax=fig.add_subplot(2, 4, 3)
-    ax.set_title(f"CPS", loc="center", fontsize=10)
-    fAbs = np.abs(CPSImage)
-    fMin, fMax = np.percentile(fAbs, [5, 95])
-    ax.imshow(fAbs, cmap='gray', vmin=fMin, vmax=fMax)
+    im[pRow] += (ax[pRow][pCol].imshow(fAbs, cmap='gray', vmin=fMin, vmax=fMax),)
+    ax[pRow][pCol].set_title(f"FFT {fAbs.shape}")
+    ax[pRow][pCol].axis('off')
 
     # IFFT
-    ax=fig.add_subplot(2, 4, 7)
-    ax.set_title(f"CPS IFFT", loc="center", fontsize=10)
-    ax.imshow(cpsIFFT.real)
+    pRow, pCol = 1, 1
+    im[pRow] += (ax[pRow][pCol].imshow(cpsIFFT.real,),)
+    ax[pRow][pCol].set_title(f"CPS IFFT")
+    ax[pRow][pCol].axis('off')
 
     # OFX
-    ax=fig.add_subplot(2, 4, 4)
-    ax.set_title(f"OFX", loc="center", fontsize=10)
-    ax.imshow(OFImage[:,:,0])
+    pRow, pCol = 1, 2
+    im[pRow] += (ax[pRow][pCol].imshow(FlowToHsv(OFImage)),)
+    ax[pRow][pCol].set_title(f"OFX", loc="center", fontsize=10)
+    ax[pRow][pCol].axis('off')
 
-    # OFY
-    ax=fig.add_subplot(2, 4, 8)
-    ax.set_title(f"OFY", loc="center", fontsize=10)
-    ax.imshow(OFImage[:,:,1])
 
+    def on_key(event):
+        global curIndex
+        
+        # 右键 → 下一帧
+        if event.key == 'right':
+            curIndex = min(curIndex + 1, len(metaData) - 1)
+        # 左键 → 上一帧
+        elif event.key == 'left':
+            curIndex = max(curIndex - 1, 0)
+        
+        # 刷新当前帧数据
+        Loop(curIndex, False)
+        
+        # 更新所有子图
+        im[0][0].set_data(curColorImage)
+        im[0][1].set_data(curDownSampleImage)
+        im[0][2].set_data(curBlocksImage)
+
+        fAbs = np.abs(curFFTImage)
+        fMin, fMax = np.percentile(fAbs, [5, 95])
+        im[1][0].set_data(fAbs)
+        im[1][0].set_clim(vmin=fMin, vmax=fMax)
+
+        im[1][1].set_data(cpsIFFT.real)
+
+        im[1][2].set_data(FlowToHsv(OFImage))
+        
+        # 刷新画布
+        fig.canvas.draw()
+
+    fig.canvas.mpl_connect('key_press_event', on_key)
+    plt.tight_layout()
     plt.show()
-
-
-
-# import numpy as np
-# import matplotlib.pyplot as plt
-# from matplotlib.colors import hsv_to_rgb
-
-# # ======================
-# # 1. 构造测试数据 (N帧 32x32x2)
-# # ======================
-# N = 10  # 帧数
-# frames = np.random.randn(N, 32, 32, 2)  # 你的数据格式
-# current_idx = 0  # 当前帧
-
-# # ======================
-# # 2. 光流转彩色图函数
-# # ======================
-# def flow2rgb(flow):
-#     dx = flow[..., 0]
-#     dy = flow[..., 1]
-#     angle = np.arctan2(dy, dx)
-#     mag = np.sqrt(dx**2 + dy**2)
-#     mag = (mag - mag.min()) / (mag.max() - mag.min() + 1e-8)
-    
-#     hsv = np.zeros((32, 32, 3))
-#     hsv[..., 0] = (angle + np.pi) / (2 * np.pi)
-#     hsv[..., 1] = mag
-#     hsv[..., 2] = 1.0
-#     return hsv_to_rgb(hsv)
-
-# # ======================
-# # 3. 创建 SUBPLOT 多子图
-# # 示例：2行1列 → 同时显示 光流彩色图 + 通道1热力图
-# # ======================
-# fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))  # 1行2列
-
-# # 初始化显示第0帧
-# flow_rgb = flow2rgb(frames[current_idx])
-# ch1 = frames[current_idx, ..., 0]
-
-# # 子图1：光流彩色图
-# im1 = ax1.imshow(flow_rgb)
-# ax1.set_title(f"Flow Frame {current_idx+1}/{N}")
-# ax1.axis('off')
-
-# # 子图2：通道1热力图
-# im2 = ax2.imshow(ch1, cmap='jet')
-# ax2.set_title(f"Channel 1")
-# ax2.axis('off')
-
-# # ======================
-# # 4. 键盘按键刷新所有子图
-# # ======================
-# def on_key(event):
-#     global current_idx
-    
-#     # 右键 → 下一帧
-#     if event.key == 'right':
-#         current_idx = min(current_idx + 1, N - 1)
-#     # 左键 → 上一帧
-#     elif event.key == 'left':
-#         current_idx = max(current_idx - 1, 0)
-    
-#     # 获取当前帧数据
-#     frame = frames[current_idx]
-#     new_rgb = flow2rgb(frame)
-#     new_ch1 = frame[..., 0]
-    
-#     # 更新所有子图
-#     im1.set_data(new_rgb)
-#     im2.set_data(new_ch1)
-    
-#     # 更新标题
-#     ax1.set_title(f"Flow Frame {current_idx+1}/{N}")
-    
-#     # 刷新画布
-#     fig.canvas.draw()
-
-# # 绑定键盘事件
-# fig.canvas.mpl_connect('key_press_event', on_key)
-
-# plt.tight_layout()
-# plt.show()
