@@ -6,11 +6,9 @@ from matplotlib.colors import hsv_to_rgb
 
 vec2 = namedtuple('vec2', ['x', 'y'])
 
-FilePathA = "../data/game_sequence/0010.png"
-FilePathB = "../data/game_sequence/0011.png"
-FILE_PREFIX = "../data/game_sequence/"
-BLOCK_SIZE = 32
-CORE_SIZE = 8
+FILE_PREFIX = "../data/game_sequence/LR_Inputs/view/"
+BLOCK_SIZE = 64
+CORE_SIZE = 16
 SIDE_SIZE = (BLOCK_SIZE - CORE_SIZE) // 2
 DOWN_SAMPLE_COUNT = 2
 
@@ -48,8 +46,8 @@ def DownSample(oriImage:np.ndarray) -> np.ndarray:
 def BlockGenerate(oriImage:np.ndarray) -> tuple[np.ndarray, int, int]:
     h, w = oriImage.shape
 
-    paddingImage = np.vstack((oriImage[:SIDE_SIZE, :], oriImage, oriImage[-SIDE_SIZE:, :]))
-    paddingImage = np.hstack((paddingImage[:, :SIDE_SIZE], paddingImage, paddingImage[:, -SIDE_SIZE:]))
+    paddingImage = np.vstack((oriImage[:SIDE_SIZE, :], oriImage, oriImage[-SIDE_SIZE:, :], oriImage[-SIDE_SIZE:, :]))
+    paddingImage = np.hstack((paddingImage[:, :SIDE_SIZE], paddingImage, paddingImage[:, -SIDE_SIZE:], paddingImage[:, -SIDE_SIZE:]))
     
     blockCountH = ((h - 1) // CORE_SIZE + 1)
     blockCountW = ((w - 1) // CORE_SIZE + 1)
@@ -92,6 +90,16 @@ def FlowToHsv(flow:np.ndarray) -> np.ndarray:
 
     # 转 RGB
     return hsv_to_rgb(hsv)
+
+def ShowImage(r, c, image, imageType, title, cmap='gray'):
+    if imageType == "complex":
+        fAbs = np.abs(image)
+        fMin, fMax = np.percentile(fAbs, [5, 95])
+        im[r][c] = ax[r][c].imshow(fAbs, cmap=cmap, vmin=fMin, vmax=fMax)
+    else :
+        im[r][c] = ax[r][c].imshow(image, cmap=cmap)
+    ax[r][c].set_title(title)
+    ax[r][c].axis('off')
 
 def Loop(n:int, firstLoop:bool):
     print("======循环开始======")
@@ -169,7 +177,7 @@ def Loop(n:int, firstLoop:bool):
                 y -= BLOCK_SIZE
             if x >= BLOCK_SIZE / 2:
                 x -= BLOCK_SIZE
-            OFImage[bh, bw] = np.array([x, y]) / 32.0
+            OFImage[bh, bw] = np.array([x, y])
     print("======循环结束======")
 
 if __name__ == '__main__':
@@ -182,12 +190,10 @@ if __name__ == '__main__':
     print(metaData[0].shape)
 
     curIndex = 0
-
     Loop(curIndex, True)
-    curIndex += 1
 
-    Loop(curIndex, False)
     curIndex += 1
+    Loop(curIndex, False)
 
     # 显示图像
     fig, ax = plt.subplots(2, 3, figsize=(18, 9))  # 1行2列
@@ -199,62 +205,34 @@ if __name__ == '__main__':
         wspace=0.2,  # 子图水平间距（默认~0.2）
         hspace=0.2   # 子图垂直间距（默认~0.2）
     )
-    im = [() for _ in range(2)]
+    im = [[None,] * 3 for _ in range(2)]
 
     # color：
-    pRow, pCol = 0, 0
-    im[pRow] += (ax[pRow][pCol].imshow(curColorImage),)
-    ax[pRow][pCol].set_title(f"blocksImage {curIndex}")
-    ax[pRow][pCol].axis('off')
+    ShowImage(0, 0, curColorImage, "rgb", f"color {curIndex}")
+    ShowImage(0, 1, curDownSampleImage, "rgb", f"down sample {curDownSampleImage.shape}")
+    ShowImage(0, 2, curBlocksImage, "rgb", f"block {curBlocksImage.shape}")
 
-    # downSample
-    pRow, pCol = 0, 1
-    im[pRow] += (ax[pRow][pCol].imshow(curDownSampleImage, cmap='gray'),)
-    ax[pRow][pCol].set_title(f"down sample {curDownSampleImage.shape}")
-    ax[pRow][pCol].axis('off')
-
-    # block：
-    pRow, pCol = 0, 2
-    im[pRow] += (ax[pRow][pCol].imshow(curBlocksImage, cmap='gray'),)
-    ax[pRow][pCol].set_title(f"block {curBlocksImage.shape}")
-    ax[pRow][pCol].axis('off')
-
-    # FFT
-    pRow, pCol = 1, 0
-    fAbs = np.abs(curFFTImage)
-    fMin, fMax = np.percentile(fAbs, [5, 95])
-    im[pRow] += (ax[pRow][pCol].imshow(fAbs, cmap='gray', vmin=fMin, vmax=fMax),)
-    ax[pRow][pCol].set_title(f"FFT {fAbs.shape}")
-    ax[pRow][pCol].axis('off')
-
-    # IFFT
-    pRow, pCol = 1, 1
-    im[pRow] += (ax[pRow][pCol].imshow(cpsIFFT.real,),)
-    ax[pRow][pCol].set_title(f"CPS IFFT")
-    ax[pRow][pCol].axis('off')
-
-    # OFX
-    pRow, pCol = 1, 2
-    im[pRow] += (ax[pRow][pCol].imshow(FlowToHsv(OFImage)),)
-    ax[pRow][pCol].set_title(f"OFX", loc="center", fontsize=10)
-    ax[pRow][pCol].axis('off')
-
+    ShowImage(1, 0, curFFTImage, "complex", f"FFT {curFFTImage.shape}")
+    ShowImage(1, 1, cpsIFFT.real, "gray", "CPS IFFT", cmap='viridis')
+    ShowImage(1, 2, FlowToHsv(OFImage), "rgb", f"OF")
 
     def on_key(event):
         global curIndex
-        
+
         # 右键 → 下一帧
         if event.key == 'right':
             curIndex = min(curIndex + 1, len(metaData) - 1)
         # 左键 → 上一帧
         elif event.key == 'left':
             curIndex = max(curIndex - 1, 0)
-        
+
         # 刷新当前帧数据
         Loop(curIndex, False)
         
         # 更新所有子图
         im[0][0].set_data(curColorImage)
+        ax[0][0].set_title(f"color {curIndex}")
+
         im[0][1].set_data(curDownSampleImage)
         im[0][2].set_data(curBlocksImage)
 
