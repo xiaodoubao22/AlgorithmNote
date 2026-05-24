@@ -29,9 +29,8 @@ cpsIFFT = np.zeros([0])
 OFImage = np.zeros([0])
 
 def ReadImage(filePath:str) -> np.ndarray:
-    print(type(filePath))
     readImage = Image.open(filePath)
-    print(f"格式: {readImage.format}, 大小: {readImage.size}, 模式: {readImage.mode}")
+    print(f"格式: {readImage.format}, 大小: {readImage.size}, 模式: {readImage.mode} 路径：{filePath}")
     return np.array(readImage) / 255.0
 
 def DownSample(oriImage:np.ndarray) -> np.ndarray:
